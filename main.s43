@@ -1,0 +1,81 @@
+#include  "bsp.h"
+  
+               NAME           MAIN
+               PUBLIC         state,main,avgvolts,sumvolts,remvolts
+               PUBLIC         Vmin,Vmax,Delta,Expectation,Vcritical
+               PUBLIC         str_signal,str_pwm,str_sine,str_triangle,str_vavg,str_vunit
+               EXTERN         SysConfig,ClearLCD
+               EXTERN         PrintCycles,task2,task1,delay,task3
+;----------------------------------------------------------------------------------
+               ORG            DataSegStart         ; Begins a DATA segment         
+state          DW             0                        ; state variable
+;----------------------------------------------------------------------- 
+;            Vars for task1
+;-----------------------------------------------------------------------
+Vmin           DW             0
+Vmax           DW             0
+Delta          DW             0
+Vcritical      DW             0
+Expectation    DW             0
+str_signal     DW             "Signal Shape"
+str_pwm        DW             "PWM"
+str_sine       DW             "SINE"
+str_triangle   DW             "TRIANGLE"
+;----------------------------------------------------------------------- 
+;            Vars for task2
+;-----------------------------------------------------------------------
+avgvolts       DW             0
+sumvolts       DW             0
+remvolts       DW             0
+str_vavg       DW             "Vavg = "
+str_vunit      DW             " [v]"
+;----------------------------------------------------------------------- 
+;            Vars for task3
+
+;-----------------------------------------------------------------------
+
+;-------------------------------------------------------------------------------------          
+             ;RSEG    CSTACK    ; shows to compiler where is the RAM populating limit
+                                ; can be ignored
+;-------------------------------------------------------------------------------------
+               ORG            CodeSegStart       ; Program Reset = Begins a CODE segment
+             
+
+main           mov.w          #StackTosStart,SP  ; Initialize stack pointer to the RAM end            
+               call           #SysConfig
+               call           #ClearLCD
+               clr            state              ; set to idle state at the beginning
+;---------------------- FSM_loop -------------------------------------
+state0         cmp            #0x00,state         ;check if state0           
+               jnz            state1
+             
+               bis.w          #CPUOFF+GIE,SR 
+
+state1         cmp            #0x01,state         ;check if state1
+               jnz            state2
+               DINT
+               ;clr            state
+               EINT
+               call           #task1
+            
+state2         cmp            #2,state                      ;check if state2
+               jnz            state3  
+               DINT
+               ;call           #ClearLCD
+               EINT
+               call           #task2
+
+
+state3         cmp            #3,state         
+               jnz            state0
+             
+               ;DINT
+               ;call           #ClearLCD
+               ;clr            state
+               ;EINT
+               call           #task3
+               jmp            state0
+             
+                          
+                 
+               END

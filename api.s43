@@ -1,0 +1,244 @@
+#include  "bsp.h"
+
+;-------------------------------------------------------------------------------
+;      MACRO 16x16 Unsigned Divider: 
+;      Quotient = Divided/Divisor , Remainder=Divided/Divisor
+;-------------------------------------------------------------------------------
+DIV16bit       MACRO          Divided,Divisor,Quotient,Remainder
+               LOCAL          L1,L2,L3
+               mov            #17,R9
+               clr            R8                ; Quotient register
+               mov.w          Divided,R7        ; Devided registers is R10,R7
+               clr            R10
+               mov.w          Divisor,R6        ; Divisor registers is R6
+                
+L3             rla            R8
+L1             dec            R9
+               jz             L2
+               rla            R7
+               rlc            R10
+               cmp            R6,R10
+               jlo            L3
+               sub            R6,R10
+               setc           
+               rlc            R8
+               jmp            L1
+                
+L2             mov.w          R8,Quotient
+               mov.w          R10,Remainder
+               ENDM 
+
+;-------------------------------------------------------------------------------
+               MODULE         API
+               PUBLIC         task2,task1,task3
+               EXTERN         Lcd_strobe,delay,ClearLCD,Lcd_data,Lcd_cmd,avgvolts
+               EXTERN         ADC10Sample,sumvolts,avgvolts ,remvolts
+               EXTERN         Vmin,Vmax,Delta,Expectation,Vcritical,ADC10Sample2
+               EXTERN         PWMOn,PWMOff
+               EXTERN         str_signal,str_pwm,str_sine,str_triangle,str_vavg,str_vunit
+               RSEG           CODE
+
+
+     
+getSample      CLR            Expectation
+               call           #Find_Edges
+               MOV            Delta,R5
+               DIV16bit       R5,#4,R11,R12   ;DIV16bit        MACRO   Divided,Divisor,Quotient,Remainder
+               MOV            Vmin,Vcritical
+               add            R11,Vcritical
+               mov            #NSAMPLES,R4               
+getSample_Ll   call           #ADC10Sample
+               bis.w          #CPUOFF+GIE,SR
+               CMP            &DataSampleStart,Vcritical
+               JGE            getSample_L2
+               inc            Expectation
+getSample_L2   dec            R4
+               JNZ            getSample_Ll
+               call           #ClearLCD
+            
+               push           #str_signal
+               call           #PrintString
+               push           #0xC0 ; second line
+               call           #Lcd_cmd
+               CMP            #EPWM,Expectation
+               JGE            getSample_L3
+               push           #str_pwm
+               call           #PrintString
+               JMP            getSample_L5
+               
+getSample_L3   CMP            #ESINE,Expectation
+               JGE            getSample_L4  
+               push           #str_sine
+               call           #PrintString
+               JMP            getSample_L5
+getSample_L4   CMP            #ETRI,Expectation
+               JGE            getSample_L5
+               push           #str_triangle
+               call           #PrintString              
+getSample_L5   ret
+
+
+
+Find_Edges     CLR            Vmin
+               CLR            Vmax
+               call           #ADC10Sample
+               bis.w          #CPUOFF+GIE,SR
+               MOV            &DataSampleStart,Vmin
+               MOV            &DataSampleStart,Vmax
+               mov            #NSAMPLES_4,R4
+               
+Find_Edges_L1  call           #ADC10Sample
+               bis.w          #CPUOFF+GIE,SR
+               CMP            &DataSampleStart,Vmax
+               JGE            Find_Edges_L2
+               MOV            &DataSampleStart,Vmax
+               JMP            Find_Edges_L2
+Find_Edges_L2  CMP            &DataSampleStart,Vmin
+               JL             Find_Edges_L3
+               MOV            &DataSampleStart,Vmin    
+Find_Edges_L3  Dec            R4
+               JNZ            Find_Edges_L1
+               MOV            Vmax,Delta            
+               SUB            Vmin,Delta
+               ret
+  
+
+
+               
+task1          call           #getSample
+               ret
+
+task2          clr            sumvolts
+               clr            avgvolts
+               clr            remvolts
+               call           #VoltageAvg
+               call           #ClearLCD
+               ; handle print
+               mov            avgvolts,R5
+               DIV16bit       R5,#VOLTAGEDIVISOR,R11,R12   ;DIV16bit        MACRO   Divided,Divisor,Quotient,Remainder
+               mov            R11,avgvolts
+               push           R12
+               call           #mul100
+               pop            R5
+               DIV16bit       R5,#VOLTAGEDIVISOR,R11,R12
+               mov            R11,remvolts
+               push           #str_vavg
+               call           #PrintString
+               push           avgvolts
+               call           #getSepN
+               call           #Lcd_data
+               call           #Lcd_data
+               push.b         #'.'
+               call           #Lcd_data
+               push           remvolts
+               call           #getSepN
+               call           #Lcd_data
+               call           #Lcd_data
+               push           #str_vunit
+               call           #PrintString
+               
+               ret
+
+task3          call           #ADC10Sample2
+               bis.w          #CPUOFF+GIE,SR
+               ;MOV            &DataSampleStart,R15
+               ;mov            &DataSampleStart+2,R14
+               push           &DataSampleStart
+               push           &DataSampleStart+2
+               call           #getAbs
+               ;pop            R15
+               ;push           R15
+               call           #muldgi
+               pop            R4
+               cmp            #2,R4
+               JGE            task3_0
+               call           #PWMOff
+               jmp            task3_c
+task3_0        call           #PWMOn
+task3_c        ret
+               
+
+
+muldgi         pop            R4
+               pop            R5
+               mov            R5,R7
+               mov            #6,R6 ; sampling frequency
+muldgiL        ADD            R7,R5
+               DEC            R6
+               JNZ            muldgiL
+               push           R5
+               push           R4
+               ret
+
+
+getAbs         pop            R4
+               pop            R5 ; val1
+               pop            R6 ; val2
+               ;push           R4
+               cmp            R5,R6 ; R6-R5
+               JL             getAbs_1
+               SUB            R5,R6
+               push           R6
+               jmp            getAbs_2
+getAbs_1       SUB            R6,R5
+               push           R5
+getAbs_2       push           R4
+               ret
+               
+
+VoltageAvg     mov            #NSAMPLES,R4            
+VoltageAvgL    call           #ADC10Sample
+               bis.w          #CPUOFF+GIE,SR
+               ADD            &DataSampleStart,sumvolts
+               cmp            #NSAMPLES,sumvolts ;CMP @R7,R6 ; R6 >= (R7)?, compare on signed numbers
+               JGE            VoltageAvg1
+               JMP            VoltageAvg2                       
+VoltageAvg1    inc            avgvolts
+               sub            #NSAMPLES,sumvolts
+VoltageAvg2    dec            R4
+               JNZ            VoltageAvgL            
+               ret     
+                                    
+
+               
+               
+PrintString    pop            R4
+               pop            R6 ; the address to the string
+               push           R4
+PrintString1   cmp.b          #0,0(R6)
+               JZ             PrintString2
+               push.b         0(R6)
+               call           #Lcd_data
+               inc            R6
+               JMP            PrintString1
+PrintString2   ret
+               
+
+mul100         pop            R4
+               pop            R5
+               mov            R5,R7
+               mov            #100,R6
+mul100L        ADD            R7,R5
+               DEC            R6
+               JNZ            mul100L
+               push           R5
+               push           R4
+               ret
+
+
+getSepN        pop            R4
+               pop            R5 ; the number
+               mov            #2,R13
+getSepN_1      DIV16bit       R5,#10,R11,R12   ;DIV16bit        MACRO   Divided,Divisor,Quotient,Remainder
+               add            #48,R12
+               push           R12
+               MOV            R11,R5
+               DEC            R13
+               JNZ            getSepN_1
+               push           R4 ; return address 
+               ret
+            
+
+;-------------------------------------------------------------
+               ENDMOD    
+               END

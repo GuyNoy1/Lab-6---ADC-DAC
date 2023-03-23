@@ -1,0 +1,97 @@
+#include  "bsp.h"
+       
+               MODULE         BSP
+               PUBLIC         GPIOconfig,ADCconfig,TIMERconfig,ADC10Sample,ADC10Sample2
+               PUBLIC         PWMOn,PWMOff
+               EXTERN         main,PBs_handler
+               EXTERN         ADC10_ISR
+            
+               RSEG           CODE                    
+;-----------------------------------------------------------------------------  
+;           GPIO congiguration
+;-----------------------------------------------------------------------------
+GPIOconfig     mov.w          #WDTPW+WDTHOLD,&WDTCTL   ; hold watchdog timer
+               ; PushButtons Setup
+               bic.b          #0x07,PBsArrPortSel
+               bic.b          #0x07,PBsArrPortDir
+               bis.b          #0x07,PBsArrIntEdgeSel ; pull-up
+               bis.b          #0x07,PBsArrIntEn ; 
+               bic.b          #0x07,PBsArrIntPend    ; clear pending interrupts
+               ;bis.b          #PB3,PBsArrPortSel
+               ; LCD Setup
+               bic.b          #0xFF,LCD_DataSel ; Data Bytes
+               bis.b          #0xFF,LCD_DataDir
+               bic.b          #PIN_RW+PIN_RS+PIN_E+PIN_PWM,&P1SEL ; Control 
+               bis.b          #PIN_RW+PIN_RS+PIN_E+PIN_PWM,&P1DIR ; 
+               
+               ; Setup LCD
+               bic.b          #PIN_RW+PIN_RS+PIN_E,LCD_ConfigPort ;clear control pins
+               mov.b          #0x00,LCD_DataOut   ;clear lcd data bytes
+
+               ; 
+               ret
+             
+;------------------------------------------------------------------------------------- 
+;            Timer config
+;-------------------------------------------------------------------------------------
+TIMERconfig    clr.b          &DCOCTL     
+               mov.b          &CALBC1_1MHZ,&BCSCTL1  ; calibrate smclk to use 1MHZ
+               mov.b          &CALDCO_1MHZ,&DCOCTL 
+            
+               ; Timer A0
+               ;mov.w          #tarHalfSec,&TACCR0 
+               ;mov.w          #MC_1+ID_3+TASSEL_2+TACLR,&TA0CTL
+   
+               ; Timer A1
+               ;mov.w          #MAXCOUNT,&TA1CCR0
+               ;mov.w          #MC_1+TASSEL_2+TACLR,&TA1CTL
+               ;mov.w          #CAP+CCIS1+CM_3+SCS+CCIE,&TA1CCTL1
+               ret
+;------------------------------------------------------------------------------------- 
+;            Timer_A0 config
+;-------------------------------------------------------------------------------------
+
+
+;-------------------------------------------------------------------------------------- 
+;            ADC congiguration 
+;--------------------------------------------------------------------------------------
+ADCconfig      mov.w          #CONSEQ_0+INCH_3+ADC10DIV_6+ADC10SSEL_3,&ADC10CTL1 ; div clock    +ADC10DIV_6
+               mov.w          #ADC10SHT_3+MSC+ADC10ON+ADC10IE,&ADC10CTL0
+               mov.b          #1,&ADC10DTC1                ; N samples
+               bis.b          #BIT3,&ADC10AE0
+               ret
+;ADCconfig_1    
+;------------------------------------------------------------------------------------- 
+;            ADC10 config
+;-------------------------------------------------------------------------------------  
+ADC10Sample    mov.b          #1,&ADC10DTC1
+               mov.w          #CONSEQ_0+INCH_3+ADC10DIV_6+ADC10SSEL_3,&ADC10CTL1
+               jmp            startSample
+
+ADC10Sample2   mov.b          #2,&ADC10DTC1
+               mov.w          #CONSEQ_2+INCH_3+ADC10DIV_6+ADC10SSEL_3,&ADC10CTL1
+               
+
+startSample    bit            #BUSY,&ADC10CTL1        ; ADC10 core inactive?
+               jnz            startSample              ;
+               mov.w          #DataSampleStart,&ADC10SA         ; Data buffer start
+               bis.w          #ENC+ADC10SC,&ADC10CTL0 ; Start sampling
+               ret
+
+PWMOn          bis.b           #PIN_PWM,&P1OUT
+               ret
+PWMOff         bic.b           #PIN_PWM,&P1OUT
+               ret
+;---------------------------------------------------------------------------------------                  
+               COMMON         INTVEC   ; Interrupt Vectors-Begins a common segment name of INTVEC 
+;--------------------------------------------------------------------------------------
+               ORG            PORT1_VECTOR       ;PORT1 Interrupt Vector
+               DW             PBs_handler        ; interrupt handler = ISR
+               ORG            ADC10_VECTOR            ; ADC10 Vector
+               DW             ADC10_ISR
+               ORG            RESET_VECTOR       ; MSP430 RESET Vector
+               DW             main  
+
+            
+               ENDMOD
+               END

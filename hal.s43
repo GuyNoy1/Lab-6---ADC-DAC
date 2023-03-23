@@ -1,0 +1,107 @@
+#include  "bsp.h"
+
+               MODULE         HAL
+               PUBLIC         SysConfig,PBs_handler,delay
+               PUBLIC         Lcd_strobe,Lcd_cmd,Lcd_data,ClearLCD,ADC10_ISR
+               EXTERN         GPIOconfig,ADCconfig,TIMERconfig
+               EXTERN         state
+               EXTERN         sumvolts
+
+               RSEG           CODE 
+;--------------------------------------------------------------------
+;             System Configuration  
+;--------------------------------------------------------------------
+SysConfig      call           #GPIOconfig
+               call           #TIMERconfig
+               call           #ADCconfig
+               ; LCD
+               push           #0x38 ;8 bit display configuration
+               call           #Lcd_cmd
+               push           #0x0C ; Display on, cursor off
+               call           #Lcd_cmd      
+               ret
+
+ADC10_ISR      bic.w          #ENC,&ADC10CTL0         ; ADC10 disabled
+               bic            #CPUOFF,0(SP)
+               reti
+
+                                             
+
+;----------------------------------------------------------------------- 
+;            PORT2 Interrupt Service Routine
+;-----------------------------------------------------------------------
+PBs_handler    push.w         #debounceVal
+               call           #delay    
+               bit.b          #PB0,PBsArrIntPend   ;check if PB0 is pushed
+               jnz            PB0sel 
+               bit.b          #PB1,PBsArrIntPend   ;check if PB1 is pushed
+               jnz            PB1sel
+               bit.b          #PB2,PBsArrIntPend   ;check if PB2 is pushed
+               jnz            PB2sel
+               reti                ; interrupt hapened from another source
+
+PB0sel         mov            #1,state 
+               mov            #PB0,R4     ; which IntPend to clear
+               jmp            exitLPM0
+PB1sel         mov            #2,state
+               mov            #PB1,R4     ; which IntPend to clear
+               jmp            exitLPM0
+PB2sel         mov            #3,state
+               mov            #PB2,R4     ; which IntPend to clear
+               jmp            exitLPM0
+PB3sel         mov            #4,state    ; idle state
+               mov            #PB3,R4     ; which IntPend to clear
+
+exitLPM0       bic            #CPUOFF,0(SP)  ; Exit LMP0
+               bic.b          R4,PBsArrIntPend  
+               reti
+;----------------------------------------------------------------------------------------------
+;            Polling based Delay function
+;----------------------------------------------------------------------------------------------                     
+delay          pop            R4        ; save return address
+               pop            R5        ; get delay value
+
+L              dec.w          R5      ;function body begin                 
+               jnz            L       ;function body end
+
+               push.w         R4
+               ret
+;--------------------------------------------------------------------
+;             LCD Functions  
+;-------------------------------------------------------------------- 
+Lcd_strobe     bis.b          #PIN_E,LCD_ConfigPort
+               push           #0x00AF
+               call           #delay
+               bic.b          #PIN_E,LCD_ConfigPort
+               ret
+
+Lcd_cmd        pop            R4
+               pop            R5
+               push           R4
+               bic.b          #PIN_RW,LCD_ConfigPort
+               bic.b          #PIN_RS,LCD_ConfigPort
+               mov.b          R5,LCD_DataOut
+               call           #Lcd_strobe
+               ret
+
+Lcd_data       pop            R4
+               pop            R5
+               push           R4
+               bic.b          #PIN_RW,LCD_ConfigPort
+               bis.b          #PIN_RS,LCD_ConfigPort
+               mov.b          R5,LCD_DataOut
+               call           #Lcd_strobe           
+               ret
+
+ClearLCD       push           #0x01
+               call           #Lcd_cmd
+               push           #0x06
+               call           #Lcd_cmd
+               push           #0x80
+               call           #Lcd_cmd
+               ret 
+
+               ENDMOD
+               END
+
+
